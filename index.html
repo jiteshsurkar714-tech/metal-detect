@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Smart Metal Inspection System</title>
+<meta name="description" content="Browser-based AI metal defect inspection system — live camera scanning, image upload analysis, crack/rust/dent detection with voice alerts.">
+
+<!-- Fonts: Rajdhani (HUD/display), Inter (body), JetBrains Mono (data/log) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ambient scanline / grid backdrop -->
+<div class="bg-grid" aria-hidden="true"></div>
+
+<div class="app">
+
+  <!-- ============ HEADER / SYSTEM STATUS BAR ============ -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true">
+          <polygon points="20,3 35,11 35,29 20,37 5,29 5,11" fill="none" stroke="currentColor" stroke-width="2"/>
+          <polygon points="20,11 28,15.5 28,24.5 20,29 12,24.5 12,15.5" fill="currentColor" opacity="0.85"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <h1>AI Smart Metal Inspection System</h1>
+        <p class="brand-sub">Computer-vision defect scanning &amp; quality analysis</p>
+      </div>
+    </div>
+
+    <div class="status-cluster" id="statusCluster">
+      <div class="status-chip" id="chipCV">
+        <span class="dot dot-idle"></span> CV ENGINE <b id="cvState">INIT</b>
+      </div>
+      <div class="status-chip" id="chipTF">
+        <span class="dot dot-idle"></span> TF.js MODEL <b id="tfState">INIT</b>
+      </div>
+      <div class="status-chip" id="chipVoice">
+        <span class="dot dot-ok"></span> VOICE <b id="voiceState">ON</b>
+      </div>
+      <div class="clock" id="clock">00:00:00</div>
+    </div>
+  </header>
+
+  <!-- ============ MODE TABS ============ -->
+  <nav class="tabs" role="tablist" aria-label="Inspection mode">
+    <button class="tab active" data-tab="camera" role="tab" aria-selected="true">
+      <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 6h3l1.5-2h7L17 6h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zm8 3.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/></svg>
+      Live Camera Scan
+    </button>
+    <button class="tab" data-tab="upload" role="tab" aria-selected="false">
+      <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 3l4.5 4.5-1.4 1.4L13 6.83V15h-2V6.83L8.9 8.9 7.5 7.5 12 3zM5 18h14v2H5v-2z"/></svg>
+      Upload Image
+    </button>
+  </nav>
+
+  <!-- ============ MAIN GRID ============ -->
+  <main class="grid">
+
+    <!-- ---------- LEFT: SCAN STAGE ---------- -->
+    <section class="panel stage-panel">
+      <div class="panel-head">
+        <span class="panel-title">Inspection Stage</span>
+        <span class="scan-status" id="scanStatus">STANDBY</span>
+      </div>
+
+      <!-- CAMERA VIEW -->
+      <div class="stage" id="cameraView">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlayCam" class="overlay"></canvas>
+        <div class="hud-frame" aria-hidden="true">
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+          <div class="scan-sweep" id="sweepCam"></div>
+          <div class="crosshair-v"></div><div class="crosshair-h"></div>
+        </div>
+        <div class="stage-empty" id="camEmpty">
+          <svg viewBox="0 0 24 24" width="42" height="42"><path fill="currentColor" d="M4 6h3l1.5-2h7L17 6h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zm8 3.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/></svg>
+          <p>Camera feed inactive</p>
+          <span>Start the scanner to begin live inspection</span>
+        </div>
+      </div>
+
+      <!-- UPLOAD VIEW -->
+      <div class="stage" id="uploadView" hidden>
+        <img id="uploadedImg" alt="Uploaded metal sample" hidden>
+        <canvas id="overlayUp" class="overlay"></canvas>
+        <div class="hud-frame" id="hudUp" aria-hidden="true" hidden>
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+          <div class="scan-sweep" id="sweepUp"></div>
+        </div>
+        <div class="stage-empty" id="upEmpty">
+          <svg viewBox="0 0 24 24" width="42" height="42"><path fill="currentColor" d="M12 3l4.5 4.5-1.4 1.4L13 6.83V15h-2V6.83L8.9 8.9 7.5 7.5 12 3zM5 18h14v2H5v-2z"/></svg>
+          <p>No image loaded</p>
+          <span>Upload a metal component photo for AI analysis</span>
+        </div>
+      </div>
+
+      <!-- CONTROLS -->
+      <div class="controls">
+        <div class="controls-row" id="cameraControls">
+          <button class="btn btn-primary" id="btnStartCam">Start Scanner</button>
+          <button class="btn btn-ghost" id="btnStopCam" disabled>Stop</button>
+          <button class="btn btn-accent" id="btnCapture" disabled>Capture &amp; Analyze</button>
+          <label class="toggle">
+            <input type="checkbox" id="chkContinuous">
+            <span>Continuous scan</span>
+          </label>
+        </div>
+        <div class="controls-row" id="uploadControls" hidden>
+          <label class="btn btn-primary file-btn">
+            Choose Image
+            <input type="file" id="fileInput" accept="image/*" hidden>
+          </label>
+          <button class="btn btn-accent" id="btnAnalyzeUp" disabled>Analyze Image</button>
+          <button class="btn btn-ghost" id="btnClearUp" disabled>Clear</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- RIGHT: RESULT PANEL ---------- -->
+    <section class="panel result-panel">
+      <div class="panel-head">
+        <span class="panel-title">Detection Result</span>
+        <span class="badge" id="resultBadge">AWAITING SCAN</span>
+      </div>
+
+      <div class="result-body">
+        <div class="defect-name" id="defectName">—</div>
+
+        <!-- Analog quality gauge (signature element) -->
+        <div class="gauge-wrap">
+          <svg viewBox="0 0 220 130" class="gauge" id="gaugeSvg">
+            <path d="M15,115 A95,95 0 0 1 205,115" class="gauge-track"/>
+            <path d="M15,115 A95,95 0 0 1 205,115" class="gauge-fill" id="gaugeFill" stroke-dasharray="298" stroke-dashoffset="298"/>
+            <g id="gaugeTicks"></g>
+            <line x1="110" y1="115" x2="110" y2="35" id="gaugeNeedle" class="gauge-needle"/>
+            <circle cx="110" cy="115" r="7" class="gauge-hub"/>
+            <text x="110" y="108" text-anchor="middle" class="gauge-value" id="gaugeValue">--</text>
+          </svg>
+          <div class="gauge-caption">METAL QUALITY SCORE</div>
+        </div>
+
+        <div class="confidence-row">
+          <div class="confidence-label">
+            <span>AI Confidence</span>
+            <span id="confidenceValue">0%</span>
+          </div>
+          <div class="meter"><div class="meter-fill" id="confidenceMeter"></div></div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-box">
+            <span class="stat-label">Damage Side</span>
+            <span class="stat-value" id="sideValue">—</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">Damage %</span>
+            <span class="stat-value" id="damagePctValue">—</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">Left Side</span>
+            <span class="stat-value" id="leftValue">—</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">Right Side</span>
+            <span class="stat-value" id="rightValue">—</span>
+          </div>
+        </div>
+
+        <div class="side-map">
+          <div class="side-half" id="sideLeft"><span>LEFT</span></div>
+          <div class="side-div"></div>
+          <div class="side-half" id="sideRight"><span>RIGHT</span></div>
+        </div>
+
+        <button class="btn btn-outline" id="btnReport" disabled>Generate Inspection Report</button>
+      </div>
+    </section>
+
+    <!-- ---------- BOTTOM: HISTORY LOG ---------- -->
+    <section class="panel log-panel">
+      <div class="panel-head">
+        <span class="panel-title">Inspection Log</span>
+        <div class="log-actions">
+          <span class="log-count" id="logCount">0 records</span>
+          <button class="btn btn-ghost btn-sm" id="btnClearLog">Clear Log</button>
+        </div>
+      </div>
+      <div class="log-table-wrap">
+        <table class="log-table">
+          <thead>
+            <tr>
+              <th>Time</th><th>Source</th><th>Defect</th><th>Confidence</th><th>Side</th><th>Quality</th>
+            </tr>
+          </thead>
+          <tbody id="logBody">
+            <tr class="log-empty-row"><td colspan="6">No inspections recorded yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <span>AI Smart Metal Inspection System — Final Year Engineering Project</span>
+    <span>Runs 100% client-side in your browser. No images leave your device.</span>
+  </footer>
+</div>
+
+<!-- hidden canvases used for pixel-level analysis -->
+<canvas id="workCanvas" hidden></canvas>
+
+<!-- TensorFlow.js + MobileNet (optional generic feature-extraction layer) -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js"></script>
+<!-- OpenCV.js (optional Canny edge pipeline; falls back to a custom Sobel pass if unavailable) -->
+<script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="window.__cvLoaded=true" onerror="window.__cvFailed=true"></script>
+
+<script src="script.js"></script>
+</body>
+</html>
